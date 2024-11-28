@@ -91,6 +91,8 @@ enum Event {
 	transactionPaidFee = 'TransactionFeePaid',
 }
 
+const performanceMetrics: { [id: string]: number } = {};
+
 export class BlocksService extends AbstractService {
 	constructor(
 		api: ApiPromise,
@@ -98,6 +100,14 @@ export class BlocksService extends AbstractService {
 		private hasQueryFeeApi: QueryFeeDetailsCache,
 	) {
 		super(api);
+	}
+
+	private async fetchExecutionTime(functionToMeasure: () => Promise<any>, metric: string): Promise<any> {
+		const start = performance.now();
+		const functionResult = await functionToMeasure();
+		const end = performance.now();
+		performanceMetrics[metric] = end - start;
+		return functionResult;
 	}
 
 	/**
@@ -121,13 +131,24 @@ export class BlocksService extends AbstractService {
 		}: FetchBlockOptions,
 	): Promise<IBlock> {
 		const { api } = this;
+		let start = performance.now();
 		const [{ block }, { specName, specVersion }, validators, events, finalizedHead] = await Promise.all([
 			api.rpc.chain.getBlock(hash),
 			api.rpc.state.getRuntimeVersion(hash),
-			this.fetchValidators(historicApi),
-			this.fetchEvents(historicApi),
+			// this.fetchValidators(historicApi),
+			this.fetchExecutionTime(() => this.fetchValidators(historicApi), 'function_fetchValidators'),
+			// this.fetchEvents(historicApi),
+			this.fetchExecutionTime(() => this.fetchEvents(historicApi), 'fetchEvents'),
 			queryFinalizedHead ? api.rpc.chain.getFinalizedHead() : Promise.resolve(hash),
 		]);
+		let end = performance.now();
+		performanceMetrics['queries_in_fetchBlock'] = end - start;
+		const eventsCount = await historicApi.query.system.eventCount();
+		if (events) {
+			console.log("Events Length : ", events.length);
+			console.log("Events Count : ", eventsCount.toNumber());
+		}
+
 
 		if (block === undefined) {
 			throw new InternalServerError('Error querying for block');
@@ -141,7 +162,10 @@ export class BlocksService extends AbstractService {
 			return { type, index, value };
 		});
 
+		start = performance.now();
 		const nonSanitizedExtrinsics = this.extractExtrinsics(block, events, historicApi.registry, extrinsicDocs);
+		end = performance.now();
+		performanceMetrics['function_extractExtrinsics'] = end - start;
 
 		const { extrinsics, onInitialize, onFinalize } = this.sanitizeEvents(
 			events,
@@ -171,6 +195,7 @@ export class BlocksService extends AbstractService {
 				extrinsics,
 				onFinalize,
 				finalized,
+				performanceMetrics,
 			};
 		}
 
@@ -184,6 +209,7 @@ export class BlocksService extends AbstractService {
 		for (let idx = 0; idx < block.extrinsics.length; ++idx) {
 			feeTasks.push(
 				pQueue.run(async () => {
+					const start = performance.now();
 					await this.resolveExtFees(
 						extrinsics,
 						block,
@@ -195,6 +221,8 @@ export class BlocksService extends AbstractService {
 						// Inject historic api here or undefined if not available, should save at least two calls per extrinsic
 						prevBlockHistoricApi,
 					);
+					const end = performance.now();
+					performanceMetrics["function_resolveExtFees"] = end - start;
 				}),
 			);
 		}
@@ -217,6 +245,7 @@ export class BlocksService extends AbstractService {
 			onFinalize,
 			finalized,
 			decodedXcmMsgs,
+			performanceMetrics,
 		};
 		return response;
 	}
@@ -394,6 +423,7 @@ export class BlocksService extends AbstractService {
 		estWeight: string,
 		historicApi?: ApiDecoration<'promise'>,
 	): Promise<string> {
+		const start = performance.now();
 		const { api } = this;
 		// Get injected historicApi for previousBlockHash or create a new one
 		const apiAt = historicApi || (await api.at(previousBlockHash));
@@ -409,7 +439,8 @@ export class BlocksService extends AbstractService {
 		}
 
 		const finalPartialFee = this.calcPartialFee(extrinsicSuccessWeight, estWeight, inclusionFee);
-
+		const end = performance.now();
+		performanceMetrics["function_fetchQueryFeeDetails"] = end - start;
 		return finalPartialFee;
 	}
 
