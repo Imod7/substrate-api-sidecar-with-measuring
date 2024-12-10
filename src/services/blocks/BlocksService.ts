@@ -131,24 +131,22 @@ export class BlocksService extends AbstractService {
 		}: FetchBlockOptions,
 	): Promise<IBlock> {
 		const { api } = this;
-		let start = performance.now();
-		const [{ block }, { specName, specVersion }, validators, events, finalizedHead] = await Promise.all([
-			api.rpc.chain.getBlock(hash),
+		let startfetchBlock = performance.now();
+		const [{ block1 }, { specName, specVersion }, validators, events, finalizedHead] = await Promise.all([
+			this.fetchExecutionTime(() => api.rpc.chain.getBlock(hash), 'rpcCall_getBlock'),
 			api.rpc.state.getRuntimeVersion(hash),
-			// this.fetchValidators(historicApi),
 			this.fetchExecutionTime(() => this.fetchValidators(historicApi), 'function_fetchValidators'),
-			// this.fetchEvents(historicApi),
-			this.fetchExecutionTime(() => this.fetchEvents(historicApi), 'fetchEvents'),
+			this.fetchExecutionTime(() => this.fetchEvents(historicApi), 'function_fetchEvents'),
 			queryFinalizedHead ? api.rpc.chain.getFinalizedHead() : Promise.resolve(hash),
 		]);
-		let end = performance.now();
-		performanceMetrics['queries_in_fetchBlock'] = end - start;
+		block1;
+		const { block } = await api.rpc.chain.getBlock(hash);
+
 		const eventsCount = await historicApi.query.system.eventCount();
 		if (events) {
 			console.log("Events Length : ", events.length);
 			console.log("Events Count : ", eventsCount.toNumber());
 		}
-
 
 		if (block === undefined) {
 			throw new InternalServerError('Error querying for block');
@@ -162,10 +160,11 @@ export class BlocksService extends AbstractService {
 			return { type, index, value };
 		});
 
-		start = performance.now();
+		let startSanExt = performance.now();
 		const nonSanitizedExtrinsics = this.extractExtrinsics(block, events, historicApi.registry, extrinsicDocs);
-		end = performance.now();
-		performanceMetrics['function_extractExtrinsics'] = end - start;
+		let endSanExt = performance.now();
+		performanceMetrics["function_extractExtrinsics"] = endSanExt - startSanExt;
+		console.log(`Execution time - function_extractExtrinsics: ${endSanExt - startSanExt} ms`);
 
 		const { extrinsics, onInitialize, onFinalize } = this.sanitizeEvents(
 			events,
@@ -229,7 +228,10 @@ export class BlocksService extends AbstractService {
 		const decodedMsgs = checkDecodedXcm ? new XcmDecoder(api, specName.toString(), extrinsics, paraId) : undefined;
 		const decodedXcmMsgs = decodedMsgs?.messages;
 
+		let startFeeTasks = performance.now();
 		await Promise.all(feeTasks);
+		let endFeeTasks = performance.now();
+		performanceMetrics["function_feeTasks"] = endFeeTasks - startFeeTasks;
 
 		feeTasks.length = 0;
 		const response = {
@@ -247,6 +249,8 @@ export class BlocksService extends AbstractService {
 			decodedXcmMsgs,
 			performanceMetrics,
 		};
+		let endfetchBlock = performance.now();
+		performanceMetrics['function_fetchBlock'] = endfetchBlock - startfetchBlock;
 		return response;
 	}
 
