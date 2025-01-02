@@ -35,6 +35,7 @@ export interface IBlock {
 	onFinalize: IOnInitializeOrFinalize;
 	finalized: boolean | undefined;
 	decodedXcmMsgs?: IMessages | undefined;
+	performanceMetrics?: { [id: string]: number } | undefined;
 }
 
 interface IOnInitializeOrFinalize {

@@ -251,6 +251,7 @@ export default class BlocksController extends AbstractController<BlocksService> 
 		},
 		res,
 	): Promise<void> => {
+		let start = performance.now();
 		const checkFinalized = isHex(number);
 		const hash = await this.getHashForBlock(number);
 
@@ -309,6 +310,8 @@ export default class BlocksController extends AbstractController<BlocksService> 
 		if (res.locals.metrics) {
 			this.emitExtrinsicMetrics(block.extrinsics.length, 1, method, path, res);
 		}
+		const end = performance.now();
+		console.log(`Execution time in Controller - getBlockById: ${end - start} ms`);
 	};
 
 	/**
